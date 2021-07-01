@@ -1,78 +1,37 @@
 <?php
+
 declare(strict_types=1);
 
-use App\Application\Handlers\HttpErrorHandler;
-use App\Application\Handlers\ShutdownHandler;
-use App\Application\ResponseEmitter\ResponseEmitter;
-use App\Application\Settings\SettingsInterface;
-use DI\ContainerBuilder;
 use Slim\Factory\AppFactory;
-use Slim\Factory\ServerRequestCreatorFactory;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
 
 require __DIR__ . '/../vendor/autoload.php';
 
-// Instantiate PHP-DI ContainerBuilder
-$containerBuilder = new ContainerBuilder();
-
-if (false) { // Should be set to true in production
-	$containerBuilder->enableCompilation(__DIR__ . '/../var/cache');
-}
-
-// Set up settings
-$settings = require __DIR__ . '/../app/settings.php';
-$settings($containerBuilder);
-
-// Set up dependencies
-$dependencies = require __DIR__ . '/../app/dependencies.php';
-$dependencies($containerBuilder);
-
-// Set up repositories
-$repositories = require __DIR__ . '/../app/repositories.php';
-$repositories($containerBuilder);
-
-// Build PHP-DI Container instance
-$container = $containerBuilder->build();
-
-// Instantiate the app
-AppFactory::setContainer($container);
 $app = AppFactory::create();
-$callableResolver = $app->getCallableResolver();
 
-// Register middleware
-$middleware = require __DIR__ . '/../app/middleware.php';
-$middleware($app);
+$app->addErrorMiddleware(true, true, false);
 
-// Register routes
-$routes = require __DIR__ . '/../app/routes.php';
-$routes($app);
+$app->get('/models', function(Request $request, Response $response, $args) {
+    $api_key = file_get_contents('https://swapi.dev/api/starships/');
+    $api_data = json_decode($api_key);
 
-/** @var SettingsInterface $settings */
-$settings = $container->get(SettingsInterface::class);
+    $res = $api_data->results;
 
-$displayErrorDetails = $settings->get('displayErrorDetails');
-$logError = $settings->get('logError');
-$logErrorDetails = $settings->get('logErrorDetails');
+    foreach($res as $r) {
+        $response->getBody()->write("Starship: $r->model");
+        $response->getBody()->write("<a href='/model/$r->model'>View Details</a>");
+    }
 
-// Create Request object from globals
-$serverRequestCreator = ServerRequestCreatorFactory::create();
-$request = $serverRequestCreator->createServerRequestFromGlobals();
+    return $response;
+});
 
-// Create Error Handler
-$responseFactory = $app->getResponseFactory();
-$errorHandler = new HttpErrorHandler($callableResolver, $responseFactory);
+$app->get('/model/{name}', function (Request $request, Response $response, $args){
+    $name = $args['name'];
+    $response->getBody()->write("Hello, $name");
+    return $response;
+});
 
-// Create Shutdown Handler
-$shutdownHandler = new ShutdownHandler($request, $errorHandler, $displayErrorDetails);
-register_shutdown_function($shutdownHandler);
 
-// Add Routing Middleware
-$app->addRoutingMiddleware();
 
-// Add Error Middleware
-$errorMiddleware = $app->addErrorMiddleware($displayErrorDetails, $logError, $logErrorDetails);
-$errorMiddleware->setDefaultErrorHandler($errorHandler);
-
-// Run App & Emit Response
-$response = $app->handle($request);
-$responseEmitter = new ResponseEmitter();
-$responseEmitter->emit($response);
+$app->run();
